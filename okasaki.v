@@ -19,32 +19,6 @@ Definition returnw (n : nat) (T : Type) (a : T) := a.
 Definition ifthenelse (T : Type) (q : bool) (a : T) (b : T) := if q then a else b.
 Definition pay (n m : nat) (T : Type) (a : T) := a.
 
-(* Module Type THUNK. *)
-(*   Parameter tick : forall n a, thunk n a -> thunk (S n) a. *)
-(*   Parameter ret : forall a, a -> thunk 0 a. *)
-(*   Parameter bind : forall n m a b, thunk n a -> (a -> thunk m b) -> thunk (m+n) b. *)
-(*   Parameter rbind : forall n m a b, (a -> thunk m b) -> thunk n a -> thunk (m+n) b. *)
-(*   Parameter force : forall n a, thunk n a -> a. *)
-(*   Parameter wait : forall n m a , thunk n a -> thunk (n+m+1) a. *)
-(*   Parameter returnw : forall n a, a -> thunk (n + 1) a. *)
-(*   Parameter ifthenelse : forall a, bool -> a -> a -> thunk 1 a.  *)
-(*   Parameter pay : forall n m a, thunk n a -> thunk m (thunk (n-m) a). *)
-(* End THUNK. *)
-
-(* Module Thunk : THUNK. *)
-(*   Definition tick (n : nat) (T : Type) (t : thunk n T) := t. *)
-(*   Definition ret (T : Type) (a : T) := a. *)
-(*   Definition force  (n : nat) (T : Type) (t : thunk n T) := t. *)
-(*   Definition bind (n m : nat) (a b : Type) (t : thunk n a) (f : a -> thunk m b) := *)
-(*     f t. *)
-(*   Definition rbind (n m : nat) (a b : Type) (f : a -> thunk m b) (t : thunk n a) := *)
-(*     f t. *)
-(*   Definition wait (n m : nat) (T : Type) (a : T) := a. *)
-(*   Definition returnw (n : nat) (T : Type) (a : T) := a. *)
-(*   Definition ifthenelse (T : Type) (q : bool) (a : T) (b : T) := if q then a else b. *)
-(*   Definition pay (n m : nat) (T : Type) (a : T) := a. *)
-(* End Thunk. *)
-(* Import Thunk.  *)
 Infix ">>=" := bind (at level 50).
 Infix "=<<" := rbind (at level 50).
 Notation "./" := tick.
