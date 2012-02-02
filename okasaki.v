@@ -5,45 +5,42 @@ Require Import Arith.
 Set Implicit Arguments.
 Obligation Tactic := crush.
 
-Inductive thunk : nat -> Type -> Type :=
-| ret : forall T, T -> thunk 0 T
-| tick : forall n T, thunk n T -> thunk (S n) T
-| bind : forall T a n m, thunk n a -> (a -> thunk m T) -> thunk (n+m) T.
+Record thunk (n : nat) (T : Type) :=
+  Thunk {force : T}.
 
-Fixpoint wait T (n m : nat) (t : thunk n T) : thunk (m+n) T := 
-  match m return thunk (m+n) T with
-    | 0    => t
-    | S m' => tick (wait m' t)
+Definition setn n T (t : thunk n T) m := Thunk m (force t).
+Definition tick n T (t : thunk n T) := setn t (S n).
+
+Definition wait T (n m : nat) (t : thunk n T) : thunk (m+n) T := setn t (m+n).
+
+Definition bind T a n m (t : thunk n a) (f : a -> thunk m T) : thunk (n+m) T := 
+  setn (f (force t)) (n+m).
+
+
+Definition pay (n m : nat) (T : Type) (t : thunk n T) : thunk m (thunk (n-m) T) :=
+  Thunk m (setn t (n-m)).
+
+Definition rbind (n m : nat) (a b : Type) (f : a -> thunk m b) (t : thunk n a) : thunk (n+m) b := bind t f.
+
+Definition returnw (n : nat) (T : Type) (a : T) : thunk (1+n) T := Thunk (1+n) a.
+Definition returnw' (n : nat) (T : Type) (a : T) : thunk (n) T := Thunk (n) a.
+Definition ret (T : Type) (a : T) : thunk 0 T := Thunk 0 a.
+
+
+Ltac makecast :=   
+  intros; f_equal; crush;
+  match goal with 
+    | [H : ?a |- ?x] => assert (a = x); f_equal; crush
   end.
 
-Fixpoint force n T (t : thunk n T) : T :=
-  match t with
-    | ret _ a => a
-    | tick _ _ a => force a
-    | bind _ _ _ _ t f => force (f (force t))
-  end.
 
-(*
-Definition pay (n m : nat) (T : Type) (t : thunk (n+m) T) : thunk m (thunk (n) T)
-  match t with
-    | ret _ a => ret (ret a)
-    | tick _ a => 
-*)
-(*Definition rbind (n m : nat) (a b : Type) (f : a -> thunk m b) (t : thunk n a) : thunk (n+m) b := bind f 
-Definition wait (n m : nat) (T : Type) (a : thunk n T) : thunk (1+n+m) T := a.
-Definition returnw (n : nat) (T : Type) (a : T) : thunk (1+n) T := a.
-Definition ifthenelse (T : Type) (q : bool) (a : T) (b : T) := if q then a else b.
-
-
-
-
-Implicit Arguments tick [[n] [T]].
+(*Implicit Arguments tick [[n] [T]].
 Implicit Arguments ret [[T]].
 Implicit Arguments force [[n] [T]].
 Implicit Arguments bind [[m] [n] [a] [b]].
 Implicit Arguments rbind [[m] [n] [a] [b]].
 Implicit Arguments wait [[n] [T]].
-Implicit Arguments pay [[n] [T]].
+Implicit Arguments pay [[n] [T]].*)
 
 
 Infix ">>=" := bind (at level 50).
@@ -61,16 +58,14 @@ Notation "[]" := Nil.
 
 Eval compute in (ret (3::(Nil nat))) >>= (fun x => ./ (ret (4::x))).
 
-Fixpoint sapp (T : Type) (n m : nat) (s1 : Seq T n) (s2 : Seq T m)
-  : thunk (1+n+n) (Seq T (n+m)) :=
-    match s1 in (Seq _ n) return thunk (1+n+n) (Seq T (n+m)) with
-      | Nil => ./ (ret s2)
+Program Fixpoint sapp (T : Type) (n m : nat) (s1 : Seq T n) (s2 : Seq T m)
+  : thunk (2+n+n) (Seq T (n+m)) :=
+    match s1 in (Seq _ n) return thunk (2+n+n) (Seq T (n+m)) with
+      | Nil => ./ (returnw 0 s2)
       | s::s1' => ./ ((sapp s1' s2) >>= (fun xs => ./ (ret (s::xs))))
     end.
-
+Obligation 1. fold plus; crush. Qed.
 Infix "++" := sapp.
-
-
 Inductive Q (T : Type) := 
 | empty : Q T
 | single : T -> Q T
@@ -87,13 +82,11 @@ Fixpoint snoc (T : Type) (t : T) (q : Q T)  : thunk 5 (Q T) :=
 
     | twoOne  t1 t2 q' t3 => ./ q' >>= (fun q => ./ (ret (twoZero t1 t2 (snoc (t3, t) q))))
 
-    | oneZero t1    q'    => ./ (returnw 3 (twoZero t t1 q'))
+    | oneZero t1    q'    => ./ (returnw 3 (twoZero t t1 (wait 3 q')))
 
     | oneOne  t1    q' t2 => ./ (pay 3 (snoc (t, t2) q') >>= 
-      (fun q => ./ (returnw 0 (oneZero t1 q))))
+      (fun q => ./ (ret (oneZero t1 q))))
  end.
-
-Eval compute in snoc 8 (snoc 7 (snoc 6 (snoc 5 (snoc 3 (snoc 4 (empty nat)))))).
 
 Inductive ViewQL (T : Type) := 
 | nilView : ViewQL T
@@ -102,15 +95,14 @@ Inductive ViewQL (T : Type) :=
 Definition expand1 (T : Type) (q : ViewQL (T*T)) : thunk 1 (Q T) :=
   match q with
     | nilView => ./ (ret (empty T))
-    | consView (a1, a2) q' =>  ./ (ret (twoZero a1 a2 (wait 0 q')))
+    | consView (a1, a2) q' =>  ./ (ret (twoZero a1 a2 (wait 1 q')))
   end.
 
-Definition expand2 (T : Type) (x1 : T) (x2 : T) (q : ViewQL (T*T)) : thunk 1 (Q T) :=
+Definition expand2 (T : Type) (x1 : T) (x2 : T) (q : ViewQL (T*T)) : thunk 3 (Q T) :=
   match q with
     | nilView => ./ (returnw 1 (single x2))
-    | consView (a1, a2) q' =>  ./ (pay 1 q' >>= (fun q'' => ret (twoOne a1 a2 q'' x2)))
+    | consView (a1, a2) q' =>  ./ (pay 1 q' >>= (fun q'' => ./ (ret (twoOne a1 a2 q'' x2))))
   end.
-
 
 Fixpoint view (T : Type) (q : Q T) : thunk 1 (ViewQL T) :=
   match q with
@@ -121,125 +113,114 @@ Fixpoint view (T : Type) (q : Q T) : thunk 1 (ViewQL T) :=
     | oneZero t1    q'    => ./ (ret (consView t1 ((q' >>= @view (T*T)) >>= (@expand1 T))))
     | oneOne  t1    q' t2 => ./ (ret (consView t1 (view q' >>= (expand2 t1 t2))))
   end.
-*)
-Inductive Stream (T : Type) : nat -> Type := 
-| SNil : Stream T 0
-| SCons : forall m, T -> thunk 1 (Stream T m) -> Stream T (S m).
+
+Inductive Stream (T : Type) : nat -> nat -> Type := 
+| SNil : forall k, Stream T k 0
+| SCons : forall k m, T -> thunk k (Stream T k m) -> Stream T k (S m).
 
 
-Fixpoint StrApp (T : Type) (n m : nat) (s1 : Stream T n) (s2 : Stream T m) : thunk (n+n+1)(Stream T (n+m)) :=
-  match s1 in (Stream _ n) return thunk (n+n+1) (Stream T (n+m)) with 
-    | SNil => ./ (ret s2)
-    | SCons _ a s1'  => (StrApp s1' s2) >>= (fun x => ./ (ret (SCons a x)))
+Lemma app_mk : forall T m, thunk (1 + 2) (Stream T 3 m) -> thunk 3 (Stream T 3 (0 + m)). 
+  crush. Qed.
+
+
+Definition StrTail (T : Type) (n k : nat) (s1 : Stream T k (S n)) : thunk k (Stream T k n) :=
+  match s1  with 
+    | SNil _ => tt
+    | SCons _ _ _ s1' => s1'
+  end.
+Definition StrHead (T : Type) (n k : nat) (s1 : Stream T k (S n)) : T :=
+  match s1 with 
+    | SNil _ => tt
+    | SCons _ _ a _ => a
   end.
 
-Eval compute in SCons 3 (SNil nat).
-
-Check refl_equal nat.
-
-
-Lemma rev_mk : forall (m n' : nat) (T : Type), thunk (1 + (1 + S m + n')) (Stream T (S m + n')) -> thunk (1 + m + S (S n')) (Stream T (m + S n')).
-  intros.
-  Lemma rev_eq : forall (m n' : nat) (T : Type), thunk (1 + (1 + S m + n')) (Stream T (S m + n')) = thunk (1 + m + S (S n')) (Stream T (m + S n')).
-    intros; f_equal; crush.
-  Qed.
-  rewrite rev_eq in X.
-  trivial.
-Qed.
-
-Fixpoint revhelper (T : Type) (n m : nat) (s1 : Stream T n) (s2 : Stream T m) :
-   (Stream T (m+n)):=
-  match s1 with 
-    | SCons (n') a s1' =>  ./(rev_mk (s1' >>= (fun x => ./(revhelper x (SCons a s2)))))
-    | SNil => ./ (StrApp s2 (SNil T))
+Program Fixpoint StrApp (T : Type) (n m k : nat) (s1 : Stream T k n) (s2 : Stream T (2+k) m)
+  : thunk (2+k) (Stream T (2+k) (n+m)) :=
+  match s1 with
+    | SCons k n' a s1' =>./(s1' >>= (fun x =>./( ret (SCons a (StrApp x s2)))))
+    | SNil k => returnw (1+k) s2
   end.
   
 
-Fixpoint StrRev (T : Type) (n : nat) (s1 : Stream T n) : (Stream T n) := 
-  revhelper s1 (SNil T).
-Eval compute in (StrRev (SCons 1 (SCons 2 (SCons 3 (SCons 4 (SNil nat)))))).
+Lemma rev_mk :  forall n' m k k' T, thunk k' (Stream T k (n' + S m)) -> thunk k' (Stream T k (S n' + m)). makecast. Qed.
 
-Inductive BankerQ (T : Type) (n : nat) :=
-| bq : forall f , n >= f -> Stream T f -> Stream T (n-f) -> BankerQ T n.
+Program Fixpoint revhelper (T : Type) (n m k : nat) (s1 : Stream T k n) (s2 : Stream T k m) { struct n} :
+   thunk (2+2*n+n*k) (Stream T k (n+m)):=
+  match n with
+    | 0 => ./ (returnw 0 s2)
+    | S n' => ./ ((StrTail s1) >>= (fun x => ./(rev_mk  n' m (revhelper (n:=n') x (SCons (StrHead (n:=(n')) s1) (returnw' k s2))))))
+  end.
+Obligation 3. fold plus. crush. Qed.
 
+Lemma rev_mk' : forall n k T, thunk (2 + 2 * n + n * k) (Stream T k (n + 0)) -> thunk (2 + 2 * n + n * k) (Stream T k n). makecast. Qed.
+
+Program Definition StrRev (T : Type) (n k: nat) (s1 : Stream T k n) : thunk (2+2*n+n*k) (Stream T k n) :=
+  rev_mk' n (revhelper s1 (SNil T k)).
+
+
+Print Implicit StrRev.
+Check StrRev.
+Check StrApp.
+(*3*rs + 3*fs*)
+
+Program Definition StrAppT T (n m a k b : nat) (s1 : thunk a (Stream T k n)) (s2 : thunk b (Stream T (2+k) m)) : thunk (5+a+b+k) (Stream T (2+k) (n+m)) :=
+./(  s1 >>= (fun x => ./(s2 >>= fun y => ./ (StrApp x y)))).
+Obligation 1.
+fold plus. crush. Qed.
+
+Check StrAppT.
+Infix "++" := StrAppT.
+
+Inductive BankerQ (T : Type) :  nat -> Type :=
+| bq : forall a b, Stream T 2 a -> thunk (2+2*b) (Stream T 0 b) -> Stream T 0 b -> BankerQ T (a+2*b).
 Check bq.
 Print Implicit bq.
 
-Program Definition BQempty (T : Type) := bq (n:=0) _ (SNil T) (SNil T).
+Program Definition emptybq T := bq (SNil T 2) (returnw 1 (SNil T 0)) (SNil T 0).
 
-Lemma three_ge_two : 3 >= 2. crush. Qed.
-Eval compute in bq three_ge_two (SCons 4 (SCons 3 (SNil nat))) (SCons 2 (SNil nat)).
 
-Fixpoint stream_less_eq (T : Type) (n m : nat) (s1 : Stream T n) (s2 : Stream T m) : bool :=
-  match s1, s2 with
-    | SNil, _ => true
-    | _, SNil => false
-    | SCons n' a s1', SCons m' b s2'  => stream_less_eq s1' s2'
+Program Definition makebq (T : Type) (a b c : nat) (s1 : Stream (thunk 1 T) a) 
+  (s2 : Stream (thunk 0 T) b) (s3 : Stream (thunk 3 T) (c+d)) (s4 : Stream (thunk 0 T) c) :
+  thunk 11 (BankerQ T (a+b+c+d+c))  :=
+  match c with
+    | 0 => (bq s1 s2 (StrRev s4) SNil )
+    | S k'  => returnw (10) (bq s1 s2 s3 s4)
   end.
 
-Lemma check_mk : forall T n n0, Stream T 0 -> Stream T (n - (n0 + (n - n0))).
-  Lemma check_eq : forall T n n0, Stream T 0 = Stream T (n - (n0 + (n - n0))).
-    crush.
-  Qed.
-  intros; rewrite <- check_eq; crush.
-Qed.
+Implicit Arguments makebq [[T]].
+Print bq.
 
-Implicit Arguments check_mk [[T] [n] [n0]].
-Print Implicit check_mk.
+Lemma snoc1 : forall T r k k', k = (S k') -> thunk (k + k + k - 3) (Stream T (r + k)) -> thunk (k' + k' + k') (Stream T (S r + k')). intros; assert (Stream T (r + S k') = Stream T (S (r + k'))); crush. Qed.
 
-Program Definition check (T : Type) (n: nat) (q : BankerQ T n) : BankerQ T n  :=
-  match q with 
-    | bq _ pf fs rs => 
-      match stream_less_eq fs rs with
-        | true =>  q
-        | false => bq _ (StrApp fs (StrRev rs)) (check_mk (SNil T))
-      end
-  end.
-Obligation Tactic := eauto.
-Program Definition bq_snoc (T : Type) (a : T) (n : nat) (q : BankerQ T n) : BankerQ T (S n) :=
+Lemma snoc2 : forall T r k k', k = (S k') -> thunk 11 (BankerQ T (S r + k' + S r)) ->thunk 11 (BankerQ T (S (r + S k' + r))). intros; assert ((BankerQ T (S r + k' + S r)) = (BankerQ T (S (r + S k' + r)))); f_equal; crush. Qed.
+
+Program Definition bq_snoc (T : Type) (a : T) (n : nat) (q : BankerQ T n)
+  : thunk 16 (BankerQ T (S n)) :=
   match q with
-    | bq _ _ fs rs => check (bq _ fs (SCons a rs))
-  end.
-Obligation 2. 
-  intros.
-  induction wildcard'; crush.
-Qed.
-
-Check bq.
-
-Definition bq_head (T : Type) (n : nat) (q : BankerQ T (S n)) :=
-  match q return (match q with
-                    | bq 0 _ _ _ => unit 
-                    | bq (S n') _ _ _  => T
-                  end) with 
-    | bq 0 _ _ _ => tt
-    | bq (S n') _ fs rs => match fs with
-                             | SCons _ a _ => a
-                             | SNil => tt
-                      end
+    | bq k r fs rs => 
+      match k with
+        |(S k') => ./ ((pay 3 fs) >>= (fun x => ./(snoc2 (k:=k) _ (makebq k' (S r) (snoc1 r _ x) (SCons a (returnw 0 rs))))))
+        | 0 => returnw 15 (dummy T (S n))
+      end
+    | dummy n => returnw 15 (dummy T (S n))
   end.
 
-Print Implicit bq.
 
+  
+
+(*
+Definition bq_head (T : Type) (n : nat) (default : T) (q : BankerQ T n) : thunk 1 T :=
+  match q with
+    | bq k r fs rs => fs >>= (fun x => 
+      match x with
+        | SNil => returnw 0 default
+        | SCons _ m _ => returnw 0 m
+      end)
+    | _ => returnw 0 default
+  end.
+*)
 Lemma ge_minus_one : forall n m : nat, (S n) >= (S m) -> n >= m. crush. Qed.
 Check SCons.
-
-Definition bq_tail (T : Type) (n : nat) (q : BankerQ T (S n)) :  thunk 4 (BankerQ T n) :=
-  match q return match q with  
-                   | bq 0 _ f _ => unit
-                   | bq (S m) _ f _ =>
-                     match f with 
-                       | SCons _ _ _ => BankerQ T n
-                       | SNil => unit
-                     end
-                 end with
-    | bq (S n') pf fs rs => match fs with
-                              | SCons _  _ fs' =>  fs' >>= (fun x => check (bq _ x rs))
-                              | SNil => tt
-                            end
-    | bq 0 _ _ _ => tt
-                      
-  end.
 
 
 Inductive BootQ (T : Type) :=
